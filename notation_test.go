@@ -1,6 +1,8 @@
 package chess
 
 import (
+	"fmt"
+	"strings"
 	"testing"
 )
 
@@ -380,6 +382,98 @@ func BenchmarkAlgebraicDecodeComplex(b *testing.B) {
 			b.Fatalf("error decoding %s: %s", moves[i%len(moves)], err)
 		}
 	}
+}
+
+func TestPromotionWithCheck(t *testing.T) {
+	promoPos := unsafeFEN("8/1P2k3/8/8/8/8/8/8 w - - 0 1")
+	promoMove := &Move{s1: B7, s2: B8, promo: Queen, tags: Check}
+
+	algebraicNotation := AlgebraicNotation{}
+	result := algebraicNotation.Encode(promoPos, promoMove)
+	if result != "b8=Q+" {
+		t.Fatalf("Expected 'b8=Q+', got '%s'", result)
+	}
+
+	longAlgebraicNotation := LongAlgebraicNotation{}
+	result = longAlgebraicNotation.Encode(promoPos, promoMove)
+	if result != "b7b8=Q+" {
+		t.Fatalf("Expected 'b7b8=Q+', got '%s'", result)
+	}
+}
+
+func TestPromotionWithCheckFromIssue84(t *testing.T) {
+	promoPos := unsafeFEN("8/1P2k3/8/8/8/8/8/8 w - - 0 1")
+	promoMove := &Move{s1: B7, s2: B8, promo: Queen}
+	promoMove.AddTag(Check)
+
+	algebraicNotation := AlgebraicNotation{}
+	result := algebraicNotation.Encode(promoPos, promoMove)
+	if result != "b8=Q+" {
+		t.Fatalf("Algebraic Notation: Expected 'b8=Q+', got '%s'", result)
+	}
+
+	longAlgebraicNotation := LongAlgebraicNotation{}
+	result = longAlgebraicNotation.Encode(promoPos, promoMove)
+	if result != "b7b8=Q+" {
+		t.Fatalf("Long Algebraic Notation: Expected 'b7b8=Q+', got '%s'", result)
+	}
+}
+
+func TestIssue84FullGame(t *testing.T) {
+	const pgn = `[Event "?"]
+[Site "?"]
+[Date "????.??.??"]
+[Round "?"]
+[White "?"]
+[Black "?"]
+[Result "*"]
+1. e4 c5 2. Nf3 Nc6 3. Bb5 g6 4. Bxc6 dxc6 5. d3 Bg7 6. h3 e5 7. a3 Nf6
+8. Nc3 Nd7 9. Be3 Qe7 10. Qd2 O-O 11. O-O f5 12. exf5 gxf5 13. Bh6 Qf6
+14. Bxg7 Qxg7 15. Qg5 Qxg5 16. Nxg5 Re8 17. Rae1 h6 18. Nf3 c4 19. dxc4 Kf7
+20. Rd1 Nf6 21. Rd6 e4 22. Nh4 Be6 23. b3 Rg8 24. Ne2 Rad8 25. Rfd1 Rxd6
+26. Rxd6 Ke7 27. c5 Ne8 28. Rd1 Nf6 29. Nd4 f4 30. Nhf5+ Bxf5 31. Nxf5+ Ke6
+32. Nxh6 Rg5 33. b4 Rd5 34. Rxd5 cxd5 35. c3 Nd7 36. Ng4 Kf5 37. Kf1 Nf8
+38. Ke2 Ne6 39. Kd2 Ng5 40. Nh6+ Kg6 41. Ng4 Kf5 42. Nh2 Ke5 43. a4 Ne6
+44. Nf1 a5 45. g3 axb4 46. cxb4 d4 47. gxf4+ Nxf4 48. a5 Nxh3 49. c6 Kd6
+50. cxb7 Kc7 51. f3 exf3 52. b8=Q+ Kxb8 53. Kd3 Kb7 54. Kxd4 Ka6 55. Kc5 Nf4
+56. Kc6 Nd3 57. b5+ Kxa5 58. b6 Nb4+ 59. Kc5 *`
+
+	reader := strings.NewReader(pgn)
+	pgnObj, err := PGN(reader)
+	if err != nil {
+		t.Fatalf("Failed to parse PGN: %v", err)
+	}
+	game := NewGame(pgnObj)
+	moves := game.Moves()
+
+	for i, mv := range moves {
+		moveNum := (i / 2) + 1
+		color := "W"
+		if i%2 == 1 {
+			color = "B"
+		}
+
+		_, err := safeEncode(LongAlgebraicNotation{}, mv.Position(), mv)
+		if err != nil {
+			t.Fatalf("Error: LongAlgebraicNotation.Encode panic at half-move %d (%d. %s): %v",
+				i, moveNum, color, err)
+		}
+
+		_, err = safeEncode(AlgebraicNotation{}, mv.Position(), mv)
+		if err != nil {
+			t.Fatalf("Error: AlgebraicNotation.Encode panic at half-move %d (%d. %s): %v",
+				i, moveNum, color, err)
+		}
+	}
+}
+
+func safeEncode(notation Encoder, pos *Position, mv *Move) (s string, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("%v", r)
+		}
+	}()
+	return notation.Encode(pos, mv), nil
 }
 
 // Benchmark promotion scenarios
